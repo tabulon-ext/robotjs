@@ -1,3 +1,36 @@
+## 0.9.1 (2026-08-01)
+
+* feat: Enable PNG image I/O on Windows.
+* build: Package PNG-enabled Node-API prebuilds with GitHub Actions.
+
+
+## 0.9.0 (2026-08-01)
+
+* feat: Add macOS Accessibility and Screen Recording permission APIs.
+* fix: Normalize smooth mouse movement timing on Windows.
+* fix: Write the complete BMP file size in serialized headers.
+* test: Adopt Target Practice 0.0.8 lifecycle and verify fixture visibility and interactivity.
+* fix: Pace `typeString` with the configured keyboard delay.
+* test: Exercise select-all shortcuts across platforms.
+
+
+## 0.8.0 (2026-07-19)
+
+* feat: Add image and color search, BMP I/O, optional PNG I/O, and display-aware screen capture. ([baf5616](https://github.com/octalmage/robotjs/commit/baf5616))
+* fix: Auto-detect Shift and AltGr modifiers in Linux `typeString`. ([fec80e5](https://github.com/octalmage/robotjs/commit/fec80e5))
+* fix: Preserve macOS keyboard compatibility and emit complete modifier lifecycles for shortcuts. ([0efcfa2](https://github.com/octalmage/robotjs/commit/0efcfa2), [d064384](https://github.com/octalmage/robotjs/commit/d064384))
+* test: Add integration coverage for Linux modifiers, macOS shortcuts, and repeated Unicode input. ([c2b0ea4](https://github.com/octalmage/robotjs/commit/c2b0ea4), [0d83176](https://github.com/octalmage/robotjs/commit/0d83176))
+
+
+## 0.7.1 (2026-05-08)
+
+* fix: Add MMBitmap buffer-cleanup callback used by Windows screen capture. ([92504c3](https://github.com/octalmage/robotjs/commit/92504c3))
+* fix: Correct scroll directions on Windows. ([7e57d6d](https://github.com/octalmage/robotjs/commit/7e57d6d))
+* fix: Send a complete Unicode key press so repeated characters do not get dropped. ([31332c5](https://github.com/octalmage/robotjs/commit/31332c5))
+* fix: Use sRGB color space for screen capture. ([17db161](https://github.com/octalmage/robotjs/commit/17db161))
+* fix: Keep UTF-8 strings alive. ([1c7ece7](https://github.com/octalmage/robotjs/commit/1c7ece7)), closes [#789](https://github.com/octalmage/robotjs/issues/789)
+
+
 ## 0.7.0 (2026-03-11)
 
 * build: Bump prebuild version and MACOSX_DEPLOYMENT_TARGET. ([7bcd7ff](https://github.com/octalmage/robotjs/commit/7bcd7ff))

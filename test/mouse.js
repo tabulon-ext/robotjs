@@ -1,7 +1,7 @@
 var robot = require('..');
 var lastKnownPos, currentPos;
 
-//Increase delay to help it reliability.
+// Increase delay to help it reliability.
 robot.setMouseDelay(100);
 
 describe('Mouse', () => {
@@ -54,6 +54,26 @@ describe('Mouse', () => {
 
     expect(robot.moveMouseSmooth("0", "0") === 1).toBeTruthy();
 
+  });
+
+  it('Move the mouse smoothly without timer stalls.', function()
+  {
+    var initialPos;
+    var startedAt;
+    var elapsed;
+
+    initialPos = robot.getMousePos();
+
+    try {
+      robot.moveMouse(0, 100);
+      startedAt = Date.now();
+      robot.moveMouseSmooth(300, 100, 3);
+      elapsed = Date.now() - startedAt;
+    } finally {
+      robot.moveMouse(initialPos.x, initialPos.y);
+    }
+
+    expect(elapsed).toBeLessThan(2000);
   });
 
   it('Click the mouse.', function()

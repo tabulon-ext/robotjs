@@ -12,6 +12,8 @@
 	#include <X11/extensions/XTest.h>
 	#include <stdlib.h>
 	#include "xdisplay.h"
+#elif defined(IS_WINDOWS)
+	#include <mmsystem.h>
 #endif
 
 #if !defined(M_SQRT2)
@@ -66,6 +68,27 @@ static int vscreenMinY = 0;
 	                         : ((button) == RIGHT_BUTTON ? MOUSEEVENTF_RIGHTDOWN \
 	                                                     : MOUSEEVENTF_MIDDLEDOWN))
 
+#endif
+
+#if defined(IS_WINDOWS)
+/* Windows' default timer tick makes per-pixel sleeps much slower than on
+ * other platforms, so request finer resolution for the whole movement. */
+static UINT beginMouseTimerResolution(void)
+{
+	TIMECAPS capabilities;
+	UINT period = 1;
+
+	if (timeGetDevCaps(&capabilities, (UINT)sizeof(capabilities)) == TIMERR_NOERROR) {
+		if (period < capabilities.wPeriodMin) {
+			period = capabilities.wPeriodMin;
+		}
+		if (period > capabilities.wPeriodMax) {
+			period = capabilities.wPeriodMax;
+		}
+	}
+
+	return timeBeginPeriod(period) == TIMERR_NOERROR ? period : 0;
+}
 #endif
 
 #if defined(IS_MACOSX)
@@ -332,8 +355,8 @@ void scrollMouse(int x, int y)
 	mouseScrollInputs[0].mi.dwFlags = MOUSEEVENTF_WHEEL;
 	mouseScrollInputs[0].mi.time = 0;
 	mouseScrollInputs[0].mi.dwExtraInfo = 0;
-	// Flip x to match other platforms.
-	mouseScrollInputs[0].mi.mouseData = -x;
+	// Preserve the existing RobotJS vertical direction convention on Windows.
+	mouseScrollInputs[0].mi.mouseData = y;
 
 	mouseScrollInputs[1].type = INPUT_MOUSE;
 	mouseScrollInputs[1].mi.dx = 0;
@@ -341,7 +364,7 @@ void scrollMouse(int x, int y)
 	mouseScrollInputs[1].mi.dwFlags = MOUSEEVENTF_HWHEEL;
 	mouseScrollInputs[1].mi.time = 0;
 	mouseScrollInputs[1].mi.dwExtraInfo = 0;
-	mouseScrollInputs[1].mi.mouseData = y;
+	mouseScrollInputs[1].mi.mouseData = -x;
 
 	SendInput(2, mouseScrollInputs, sizeof(INPUT));
 #endif
@@ -371,12 +394,18 @@ static double crude_hypot(double x, double y)
 	return ((M_SQRT2 - 1.0) * small) + big;
 }
 
-bool smoothlyMoveMouse(MMPoint endPoint,double speed)
+bool smoothlyMoveMouse(MMSignedPoint endPoint,double speed)
 {
 	MMSignedPoint pos = getMousePos();
-	MMSize screenSize = getMainDisplaySize();
 	double velo_x = 0.0, velo_y = 0.0;
 	double distance;
+#if defined(IS_WINDOWS)
+	UINT timerPeriod;
+#endif
+
+#if defined(IS_WINDOWS)
+	timerPeriod = beginMouseTimerResolution();
+#endif
 
 	while ((distance = crude_hypot((double)pos.x - endPoint.x,
 	                               (double)pos.y - endPoint.y)) > 1.0) {
@@ -390,20 +419,20 @@ bool smoothlyMoveMouse(MMPoint endPoint,double speed)
 		velo_x /= veloDistance;
 		velo_y /= veloDistance;
 
-		pos.x += floor(velo_x + 0.5);
-		pos.y += floor(velo_y + 0.5);
-
-		/* Make sure we are in the screen boundaries!
-		 * (Strange things will happen if we are not.) */
-		if (pos.x >= (int32_t)screenSize.width || pos.y >= (int32_t)screenSize.height) {
-			return false;
-		}
+		pos.x += (int32_t)floor(velo_x + 0.5);
+		pos.y += (int32_t)floor(velo_y + 0.5);
 
 		moveMouse(pos);
 
 		/* Wait 1 - (speed) milliseconds. */
 		microsleep(DEADBEEF_UNIFORM(0.7, speed));
 	}
+
+#if defined(IS_WINDOWS)
+	if (timerPeriod != 0) {
+		timeEndPeriod(timerPeriod);
+	}
+#endif
 
 	return true;
 }

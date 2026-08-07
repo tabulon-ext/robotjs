@@ -31,7 +31,10 @@ extern "C"
 		MOD_META = Mod4Mask,
 		MOD_ALT = Mod1Mask,
 		MOD_CONTROL = ControlMask,
-		MOD_SHIFT = ShiftMask
+		MOD_SHIFT = ShiftMask,
+		/* AltGr (ISO_Level3_Shift) — not a real X11 modifier mask bit; handled
+		 * specially in toggleKeyCode by pressing XK_ISO_Level3_Shift. */
+		MOD_ALTGR = 0x1000
 	};
 
 	typedef unsigned int MMKeyFlags;

@@ -10,6 +10,7 @@
 	#import <IOKit/hidsystem/ev_keymap.h>
 #elif defined(USE_X11)
 	#include <X11/extensions/XTest.h>
+	#include <X11/XKBlib.h>
 	#include "xdisplay.h"
 #endif
 
@@ -47,6 +48,24 @@ static io_connect_t _getAuxiliaryKeyDriver(void)
 		IOObjectRelease(iter);
 	}
 	return sEventDrvrRef;
+}
+
+static void postMacKeyEvent(MMKeyCode code, const bool down, CGEventFlags flags)
+{
+	CGEventRef keyEvent = CGEventCreateKeyboardEvent(NULL,
+	                                                 (CGKeyCode)code, down);
+	assert(keyEvent != NULL);
+
+	/* Hardware arrow-key events carry this flag. Mission Control ignores
+	 * synthetic Control+Arrow shortcuts without it. */
+	if (code == K_UP || code == K_DOWN || code == K_LEFT || code == K_RIGHT) {
+		flags |= kCGEventFlagMaskSecondaryFn;
+	}
+
+	CGEventSetType(keyEvent, down ? kCGEventKeyDown : kCGEventKeyUp);
+	CGEventSetFlags(keyEvent, flags);
+	CGEventPost(kCGSessionEventTap, keyEvent);
+	CFRelease(keyEvent);
 }
 #endif
 
@@ -124,15 +143,51 @@ void toggleKeyCode(MMKeyCode code, const bool down, MMKeyFlags flags)
 		event.compound.misc.L[0] = evtInfo;
 		kr = IOHIDPostEvent( _getAuxiliaryKeyDriver(), NX_SYSDEFINED, loc, &event, kNXEventDataVersion, 0, FALSE );
 		assert( KERN_SUCCESS == kr );
-	} else {
-		CGEventRef keyEvent = CGEventCreateKeyboardEvent(NULL,
-		                                                 (CGKeyCode)code, down);
-		assert(keyEvent != NULL);
+	} else if (down) {
+		CGEventFlags activeFlags = 0;
 
-		CGEventSetType(keyEvent, down ? kCGEventKeyDown : kCGEventKeyUp);
-		CGEventSetFlags(keyEvent, flags);
-		CGEventPost(kCGSessionEventTap, keyEvent);
-		CFRelease(keyEvent);
+		/* Post real modifier events around the key. Chromium and other apps
+		 * ignore bare flag bits for some shortcuts, and explicit key-up events
+		 * prevent the modifier from remaining active after the key tap. */
+		if (flags & MOD_META) {
+			activeFlags |= kCGEventFlagMaskCommand;
+			postMacKeyEvent(K_META, true, activeFlags);
+		}
+		if (flags & MOD_ALT) {
+			activeFlags |= kCGEventFlagMaskAlternate;
+			postMacKeyEvent(K_ALT, true, activeFlags);
+		}
+		if (flags & MOD_CONTROL) {
+			activeFlags |= kCGEventFlagMaskControl;
+			postMacKeyEvent(K_CONTROL, true, activeFlags);
+		}
+		if (flags & MOD_SHIFT) {
+			activeFlags |= kCGEventFlagMaskShift;
+			postMacKeyEvent(K_SHIFT, true, activeFlags);
+		}
+
+		postMacKeyEvent(code, true, (CGEventFlags)flags);
+	} else {
+		CGEventFlags activeFlags = (CGEventFlags)flags;
+
+		postMacKeyEvent(code, false, activeFlags);
+
+		if (flags & MOD_SHIFT) {
+			activeFlags &= ~kCGEventFlagMaskShift;
+			postMacKeyEvent(K_SHIFT, false, activeFlags);
+		}
+		if (flags & MOD_CONTROL) {
+			activeFlags &= ~kCGEventFlagMaskControl;
+			postMacKeyEvent(K_CONTROL, false, activeFlags);
+		}
+		if (flags & MOD_ALT) {
+			activeFlags &= ~kCGEventFlagMaskAlternate;
+			postMacKeyEvent(K_ALT, false, activeFlags);
+		}
+		if (flags & MOD_META) {
+			activeFlags &= ~kCGEventFlagMaskCommand;
+			postMacKeyEvent(K_META, false, activeFlags);
+		}
 	}
 #elif defined(IS_WINDOWS)
 	const DWORD dwFlags = down ? 0 : KEYEVENTF_KEYUP;
@@ -165,6 +220,7 @@ void toggleKeyCode(MMKeyCode code, const bool down, MMKeyFlags flags)
 		if (flags & MOD_ALT) X_KEY_EVENT_WAIT(display, K_ALT, is_press);
 		if (flags & MOD_CONTROL) X_KEY_EVENT_WAIT(display, K_CONTROL, is_press);
 		if (flags & MOD_SHIFT) X_KEY_EVENT_WAIT(display, K_SHIFT, is_press);
+		if (flags & MOD_ALTGR) X_KEY_EVENT_WAIT(display, XK_ISO_Level3_Shift, is_press);
 
 		X_KEY_EVENT_WAIT(display, code, is_press);
 	} else {
@@ -172,6 +228,7 @@ void toggleKeyCode(MMKeyCode code, const bool down, MMKeyFlags flags)
 		X_KEY_EVENT_WAIT(display, code, is_press);
 
 		/* Parse modifier keys. */
+		if (flags & MOD_ALTGR) X_KEY_EVENT(display, XK_ISO_Level3_Shift, is_press);
 		if (flags & MOD_META) X_KEY_EVENT(display, K_META, is_press);
 		if (flags & MOD_ALT) X_KEY_EVENT(display, K_ALT, is_press);
 		if (flags & MOD_CONTROL) X_KEY_EVENT(display, K_CONTROL, is_press);
@@ -205,6 +262,32 @@ void toggleKey(char c, const bool down, MMKeyFlags flags)
     if ((modifiers & 2) != 0) flags |= MOD_CONTROL;
     if ((modifiers & 4) != 0) flags |= MOD_ALT;
     keyCode = keyCode & 0xff; // Mask out modifiers.
+#elif defined(USE_X11)
+	{
+		/* Determine which modifier(s) the current keyboard layout requires to
+		 * produce this keysym.  We check all four XKB levels:
+		 *   0 = no modifier, 1 = Shift, 2 = AltGr, 3 = AltGr+Shift
+		 * This covers symbols like @, !, #, $ (Shift on US) as well as
+		 * characters like €, @, \ that sit behind AltGr on many EU layouts. */
+		Display *display = XGetMainDisplay();
+		KeyCode kc = XKeysymToKeycode(display, keyCode);
+		if (kc != 0) {
+			KeySym ks_normal      = XkbKeycodeToKeysym(display, kc, 0, 0);
+			KeySym ks_shift       = XkbKeycodeToKeysym(display, kc, 0, 1);
+			KeySym ks_altgr       = XkbKeycodeToKeysym(display, kc, 0, 2);
+			KeySym ks_altgr_shift = XkbKeycodeToKeysym(display, kc, 0, 3);
+
+			if (ks_normal != (KeySym)keyCode) {
+				if (ks_shift == (KeySym)keyCode) {
+					flags |= MOD_SHIFT;
+				} else if (ks_altgr != NoSymbol && ks_altgr == (KeySym)keyCode) {
+					flags |= MOD_ALTGR;
+				} else if (ks_altgr_shift != NoSymbol && ks_altgr_shift == (KeySym)keyCode) {
+					flags |= MOD_ALTGR | MOD_SHIFT;
+				}
+			}
+		}
+	}
 #endif
 	toggleKeyCode(keyCode, down, flags);
 }
@@ -261,17 +344,20 @@ void unicodeTap(const unsigned value)
 		toggleUnicode(ch, true);
 		toggleUnicode(ch, false);
 	#elif defined(IS_WINDOWS)
-		INPUT ip;
+		INPUT ip[2];
 
-		// Set up a generic keyboard event.
-		ip.type = INPUT_KEYBOARD;
-		ip.ki.wVk = 0; // Virtual-key code
-		ip.ki.wScan = value; // Hardware scan code for key
-		ip.ki.time = 0; // System will provide its own time stamp.
-		ip.ki.dwExtraInfo = 0; // No extra info. Use the GetMessageExtraInfo function to obtain this information if needed.
-		ip.ki.dwFlags = KEYEVENTF_UNICODE; // KEYEVENTF_KEYUP for key release.
+		// Send a complete Unicode key press so repeated characters do not get dropped.
+		ip[0].type = INPUT_KEYBOARD;
+		ip[0].ki.wVk = 0;
+		ip[0].ki.wScan = value;
+		ip[0].ki.time = 0;
+		ip[0].ki.dwExtraInfo = 0;
+		ip[0].ki.dwFlags = KEYEVENTF_UNICODE;
 
-		SendInput(1, &ip, sizeof(INPUT));
+		ip[1] = ip[0];
+		ip[1].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+
+		SendInput(2, ip, sizeof(INPUT));
 	#endif
 }
 
